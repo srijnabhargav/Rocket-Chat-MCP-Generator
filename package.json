@@ -1,0 +1,27 @@
+{
+  "name": "rocket-chat-mcp-generator",
+  "version": "0.1.0",
+  "description": "Gemini CLI extension for generating minimal Rocket.Chat MCP servers",
+  "type": "module",
+  "main": "dist/adapters/mcp/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/adapters/mcp/server.ts",
+    "start": "node dist/adapters/mcp/server.js",
+    "test": "tsx --test src/tests/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "openapi-types": "^12.1.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

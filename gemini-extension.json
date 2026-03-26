@@ -1,0 +1,17 @@
+{
+  "name": "rocket-chat-mcp-generator",
+  "version": "0.1.0",
+  "owner": "Rocket.Chat",
+  "description": "Generate minimal Rocket.Chat MCP servers from selected API capabilities",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "rocket-chat-mcp-generator": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "${extensionPath}${/}src${/}adapters${/}mcp${/}server.ts"
+      ],
+      "cwd": "${extensionPath}"
+    }
+  }
+}
