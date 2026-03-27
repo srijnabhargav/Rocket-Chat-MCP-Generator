@@ -21,6 +21,22 @@ export const loginEndpoint: FullEndpoint = {
       required: ["user", "password"],
     },
   },
+  responseSchema: {
+    statusCode: "200",
+    contentType: "application/json",
+    schema: {
+      type: "object",
+      properties: {
+        data: {
+          type: "object",
+          properties: {
+            authToken: { type: "string" },
+            userId: { type: "string" },
+          },
+        },
+      },
+    },
+  },
   security: [],
   inputSchema: {
     type: "object",
@@ -42,6 +58,17 @@ export const statisticsEndpoint: FullEndpoint = {
   domain: "statistics",
   tag: "Statistics",
   parameters: [],
+  responseSchema: {
+    statusCode: "200",
+    contentType: "application/json",
+    schema: {
+      type: "object",
+      properties: {
+        totalUsers: { type: "number" },
+        onlineUsers: { type: "number" },
+      },
+    },
+  },
   security: [],
   inputSchema: {
     type: "object",
@@ -77,6 +104,25 @@ export const channelsListEndpoint: FullEndpoint = {
       schema: { type: "number" },
     },
   ],
+  responseSchema: {
+    statusCode: "200",
+    contentType: "application/json",
+    schema: {
+      type: "object",
+      properties: {
+        channels: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              _id: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  },
   security: [{ userAuth: [] }],
   inputSchema: {
     type: "object",
@@ -118,6 +164,22 @@ export const postMessageEndpoint: FullEndpoint = {
         text: { type: "string" },
       },
       required: ["roomId", "text"],
+    },
+  },
+  responseSchema: {
+    statusCode: "200",
+    contentType: "application/json",
+    schema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "object",
+          properties: {
+            _id: { type: "string" },
+            roomId: { type: "string" },
+          },
+        },
+      },
     },
   },
   security: [{ userAuth: [] }],

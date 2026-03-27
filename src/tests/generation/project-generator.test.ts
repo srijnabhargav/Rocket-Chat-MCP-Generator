@@ -3,12 +3,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
-import { buildGenerationPlan } from "../../planning/index.js";
+import {
+  buildDependencyGraph,
+  buildGenerationPlan,
+  groupCapabilities,
+} from "../../planning/index.js";
 import {
   generateProjectFiles,
   writeGeneratedProject,
 } from "../../generation/project-generator.js";
 import {
+  channelsListEndpoint,
   loginEndpoint,
   postMessageEndpoint,
   statisticsEndpoint,
@@ -119,5 +124,39 @@ describe("generateProjectFiles", () => {
     } finally {
       rmSync(outputDir, { recursive: true, force: true });
     }
+  });
+
+  it("prefers capability-shaped tools when capabilities are present", () => {
+    const graph = buildDependencyGraph([
+      channelsListEndpoint,
+      postMessageEndpoint,
+      loginEndpoint,
+    ]);
+    const capabilities = groupCapabilities({
+      endpointIds: [
+        channelsListEndpoint.operationId,
+        postMessageEndpoint.operationId,
+      ],
+      preferredOperationIds: [postMessageEndpoint.operationId],
+      graph,
+    });
+    const plan = buildGenerationPlan({
+      serverName: "capability-server",
+      endpoints: [channelsListEndpoint, postMessageEndpoint, loginEndpoint],
+      selectedOperationIds: [postMessageEndpoint.operationId],
+      capabilities,
+    });
+
+    const files = generateProjectFiles(plan, [
+      channelsListEndpoint,
+      postMessageEndpoint,
+      loginEndpoint,
+    ]);
+
+    assert.ok(files["src/tools/post_message.ts"]);
+    assert.ok(files["src/tools/post-api-v1-chat_postMessage.ts"]);
+    assert.ok(!files["src/tests/post-api-v1-chat_postMessage.test.ts"]);
+    assert.match(files["src/tools/index.ts"], /post_message/);
+    assert.doesNotMatch(files["src/tools/index.ts"], /post-api-v1-chat_postMessage/);
   });
 });

@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   listWorkflows,
+  resolveGoal,
   searchEndpoints,
   suggestEndpoints,
 } from "../../discovery/index.js";
@@ -31,6 +32,10 @@ const server = new McpServer({
   name: "rocket-chat-mcp-generator",
   version: "0.1.0",
 });
+const resolvedPlanStore = new Map<
+  string,
+  { plan: ReturnType<typeof buildGenerationPlan>; endpoints: FullEndpoint[] }
+>();
 
 function isValidDomain(value: string): value is Domain {
   return VALID_DOMAINS.includes(value as Domain);
@@ -77,6 +82,64 @@ function formatWarnings(
       ]
     : [];
 }
+
+server.registerTool(
+  "resolve_goal",
+  {
+    description:
+      "Analyze a natural-language goal and produce a ready-to-confirm generation plan with capabilities and resolved endpoints.",
+    inputSchema: {
+      goal: z
+        .string()
+        .describe("What the generated Rocket.Chat MCP server should do, in the user's own words."),
+      serverName: z
+        .string()
+        .optional()
+        .describe("Optional name for the generated server."),
+      outputMode: z
+        .enum(["mcp-server", "mcp-server-extension"])
+        .optional()
+        .describe("Generated output mode."),
+    },
+  },
+  async ({ goal, serverName, outputMode }) => {
+    try {
+      const resolved = await resolveGoal({
+        goal,
+        serverName,
+        outputMode: outputMode as OutputMode | undefined,
+      });
+      resolvedPlanStore.set(resolved.planId, {
+        plan: resolved.plan,
+        endpoints: resolved.endpoints,
+      });
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: [
+              resolved.summary,
+              "",
+              `To generate this server, call generate_from_plan with planId "${resolved.planId}".`,
+              ...formatWarnings(resolved.plan.warnings),
+            ].join("\n"),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Goal resolution failed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
 
 server.registerTool(
   "discover_endpoints",
@@ -431,6 +494,69 @@ server.registerTool(
           {
             type: "text" as const,
             text: `Failed to build generation plan: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "generate_from_plan",
+  {
+    description:
+      "Generate a Rocket.Chat MCP server from a previously resolved plan. Call resolve_goal first.",
+    inputSchema: {
+      planId: z
+        .string()
+        .describe("Plan ID returned by resolve_goal."),
+      outputDir: z
+        .string()
+        .describe("Directory where the generated project should be created."),
+    },
+  },
+  async ({ planId, outputDir }) => {
+    const storedPlan = resolvedPlanStore.get(planId);
+    if (!storedPlan) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Unknown planId "${planId}". Call resolve_goal first to create a plan.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    try {
+      const manifest = writeGeneratedProject({
+        outputDir,
+        plan: storedPlan.plan,
+        endpoints: storedPlan.endpoints,
+      });
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: [
+              `Project created at: ${manifest.projectDir}`,
+              `Server name: ${manifest.serverName}`,
+              `Tool count: ${manifest.toolCount}`,
+              `Files written: ${manifest.filePaths.length}`,
+              ...formatWarnings(storedPlan.plan.warnings),
+            ].join("\n"),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Plan-based generation failed: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
         isError: true,

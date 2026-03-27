@@ -43,15 +43,18 @@ interface WorkflowGenerationStepTarget {
 function buildToolDescriptors(
   endpoints: FullEndpoint[],
   workflows: WorkflowGenerationTarget[],
+  includeEndpointTools = true,
 ): GeneratedToolDescriptor[] {
   return [
-    ...endpoints.map((endpoint) => ({
-      fileName: endpoint.operationId,
-      toolName: endpoint.operationId,
-      description: endpoint.summary || endpoint.description,
-      method: endpoint.method,
-      path: endpoint.path,
-    })),
+    ...(includeEndpointTools
+      ? endpoints.map((endpoint) => ({
+          fileName: endpoint.operationId,
+          toolName: endpoint.operationId,
+          description: endpoint.summary || endpoint.description,
+          method: endpoint.method,
+          path: endpoint.path,
+        }))
+      : []),
     ...workflows.map((workflow) => ({
       fileName: workflow.fileName,
       toolName: workflow.toolName,
@@ -83,6 +86,31 @@ function resolveWorkflowStepTargets(input: {
   return resolvedSteps;
 }
 
+function toWorkflowGenerationTarget(input: {
+  name: string;
+  description: string;
+  steps: WorkflowGenerationStepTarget[];
+  fileName?: string;
+  toolName?: string;
+}): WorkflowGenerationTarget {
+  return {
+    definition: {
+      name: input.name,
+      description: input.description,
+      domains: [],
+      operationIds: input.steps.map((step) => step.endpoint.operationId),
+      steps: input.steps.map((step) => ({
+        id: step.id,
+        operationId: step.endpoint.operationId,
+        inputMappings: step.inputMappings,
+      })),
+    },
+    steps: input.steps,
+    fileName: input.fileName ?? `workflow_${input.name}`,
+    toolName: input.toolName ?? `workflow_${input.name}`,
+  };
+}
+
 function resolveWorkflowTargets(
   plan: GenerationPlan,
   endpoints: FullEndpoint[],
@@ -106,12 +134,40 @@ function resolveWorkflowTargets(
     }
 
     return [
-      {
-        definition,
+      toWorkflowGenerationTarget({
+        name: definition.name,
+        description: definition.description,
         steps,
-        fileName: `workflow_${definition.name}`,
-        toolName: `workflow_${definition.name}`,
-      },
+      }),
+    ];
+  });
+}
+
+function resolveCapabilityTargets(
+  plan: GenerationPlan,
+  endpoints: FullEndpoint[],
+): WorkflowGenerationTarget[] {
+  const endpointMap = new Map(
+    endpoints.map((endpoint) => [endpoint.operationId, endpoint]),
+  );
+
+  return plan.capabilities.flatMap((capability) => {
+    const steps = resolveWorkflowStepTargets({
+      steps: capability.steps,
+      endpointMap,
+    });
+    if (!steps || steps.length === 0) {
+      return [];
+    }
+
+    return [
+      toWorkflowGenerationTarget({
+        name: capability.name,
+        description: capability.description,
+        steps,
+        fileName: capability.name,
+        toolName: capability.name,
+      }),
     ];
   });
 }
@@ -121,7 +177,15 @@ export function generateProjectFiles(
   endpoints: FullEndpoint[],
 ): Record<string, string> {
   const workflowTargets = resolveWorkflowTargets(plan, endpoints);
-  const toolDescriptors = buildToolDescriptors(endpoints, workflowTargets);
+  const capabilityTargets = resolveCapabilityTargets(plan, endpoints);
+  const exposeEndpointTools = capabilityTargets.length === 0;
+  const exposedTargets = capabilityTargets.length > 0 ? capabilityTargets : workflowTargets;
+  const generatedTargets = [...workflowTargets, ...capabilityTargets];
+  const toolDescriptors = buildToolDescriptors(
+    endpoints,
+    exposedTargets,
+    exposeEndpointTools,
+  );
 
   const files: Record<string, string> = {
     "src/server.ts": generateServerEntry(plan.serverName, toolDescriptors.length),
@@ -138,10 +202,12 @@ export function generateProjectFiles(
 
   for (const endpoint of endpoints) {
     files[`src/tools/${endpoint.operationId}.ts`] = generateToolFile(endpoint);
-    files[`src/tests/${endpoint.operationId}.test.ts`] = generateToolTest(endpoint);
+    if (exposeEndpointTools) {
+      files[`src/tests/${endpoint.operationId}.test.ts`] = generateToolTest(endpoint);
+    }
   }
 
-  for (const workflow of workflowTargets) {
+  for (const workflow of generatedTargets) {
     files[`src/tools/${workflow.fileName}.ts`] = generateWorkflowToolFile({
       fileName: workflow.fileName,
       toolName: workflow.toolName,
@@ -166,6 +232,12 @@ export function writeGeneratedProject(input: {
 }): GeneratedProjectManifest {
   const projectDir = resolve(input.outputDir);
   const files = generateProjectFiles(input.plan, input.endpoints);
+  const workflowTargets = resolveWorkflowTargets(input.plan, input.endpoints);
+  const capabilityTargets = resolveCapabilityTargets(input.plan, input.endpoints);
+  const toolCount =
+    capabilityTargets.length > 0
+      ? capabilityTargets.length
+      : input.endpoints.length + workflowTargets.length;
 
   mkdirSync(join(projectDir, "src", "tools"), { recursive: true });
   mkdirSync(join(projectDir, "src", "tests"), { recursive: true });
@@ -178,8 +250,6 @@ export function writeGeneratedProject(input: {
     serverName: input.plan.serverName,
     projectDir,
     filePaths: Object.keys(files),
-    toolCount: Object.keys(files).filter(
-      (path) => path.startsWith("src/tools/") && path !== "src/tools/index.ts",
-    ).length,
+    toolCount,
   };
 }

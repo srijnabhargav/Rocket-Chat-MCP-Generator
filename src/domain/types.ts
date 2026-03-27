@@ -68,6 +68,12 @@ export interface EndpointRequestBody {
   schema: Record<string, unknown>;
 }
 
+export interface EndpointResponseSchema {
+  statusCode: string;
+  contentType: string;
+  schema: Record<string, unknown>;
+}
+
 export interface FullEndpoint {
   operationId: string;
   method: string;
@@ -78,6 +84,7 @@ export interface FullEndpoint {
   tag: string;
   parameters: EndpointParameter[];
   requestBody?: EndpointRequestBody;
+  responseSchema?: EndpointResponseSchema;
   security: Array<Record<string, string[]>>;
   inputSchema: Record<string, unknown>;
 }
@@ -108,6 +115,34 @@ export interface WorkflowDefinition {
   operationIds: string[];
 }
 
+export type SchemaConnectionConfidence = "exact" | "likely" | "possible";
+
+export interface EndpointFieldRef {
+  operationId: string;
+  fieldName: string;
+  fieldPath: string;
+  type: string;
+  direction: "input" | "output";
+}
+
+export interface SchemaConnection {
+  from: EndpointFieldRef;
+  to: EndpointFieldRef;
+  fieldName: string;
+  confidence: SchemaConnectionConfidence;
+}
+
+export interface CapabilityDefinition {
+  name: string;
+  description: string;
+  endpoints: string[];
+  primaryEndpoint: string;
+  prerequisites: string[];
+  dataFlows: SchemaConnection[];
+  steps: WorkflowStepDefinition[];
+  isComposed: boolean;
+}
+
 export interface PlanWarning {
   code:
     | "missing_operation_ids"
@@ -126,6 +161,7 @@ export interface GenerationPlan {
   selectedWorkflows: string[];
   resolvedWorkflowOperationIds: string[];
   resolvedOperationIds: string[];
+  capabilities: CapabilityDefinition[];
   warnings: PlanWarning[];
   authStrategy: AuthStrategy;
 }

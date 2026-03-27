@@ -14,7 +14,16 @@ The goal is to keep the generated server:
 
 ## Workflow
 
-Use the tools in this order:
+Use the tools in this order.
+
+Default flow for Gemini CLI:
+
+1. Call `resolve_goal` with the user's natural-language description.
+2. Show the returned plan summary to the user and confirm it.
+3. Call `generate_from_plan` with the `planId` and output directory.
+4. Validate the generated project when useful.
+
+Advanced flow for fine-grained control:
 
 1. Discover endpoints by domain or tag.
 2. Build a generation plan from the selected operationIds.
@@ -25,6 +34,7 @@ Use the tools in this order:
 ## Guidelines
 
 - Prefer the smallest endpoint set that solves the user's problem.
+- Prefer `resolve_goal` over manual endpoint browsing unless the user explicitly wants fine control.
 - Do not generate unrelated Rocket.Chat API surface.
 - Treat generation as engine-first: plan before generating.
 - Treat automation as optional. Do not assume install, build, or registration should happen automatically.

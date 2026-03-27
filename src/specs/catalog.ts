@@ -178,6 +178,53 @@ function buildInputSchema(
   };
 }
 
+function extractResponseSchema(
+  responses?: OpenAPIV3.ResponsesObject,
+): FullEndpoint["responseSchema"] {
+  if (!responses) {
+    return undefined;
+  }
+
+  const preferredStatusCodes = ["200", "201", "202"];
+  const responseEntries = Object.entries(responses).filter(([statusCode]) =>
+    /^[2-9]\d\d$/.test(statusCode),
+  );
+  const orderedEntries = [
+    ...preferredStatusCodes
+      .map((statusCode) => [statusCode, responses[statusCode]] as const)
+      .filter((entry) => entry[1] !== undefined),
+    ...responseEntries.filter(
+      ([statusCode]) => !preferredStatusCodes.includes(statusCode),
+    ),
+  ];
+
+  for (const [statusCode, response] of orderedEntries) {
+    if (!response || "$ref" in response) {
+      continue;
+    }
+
+    const jsonContent = Object.entries(response.content ?? {}).find(
+      ([contentType, mediaType]) =>
+        (contentType === "application/json" || contentType.endsWith("+json")) &&
+        mediaType?.schema,
+    );
+    if (!jsonContent) {
+      continue;
+    }
+
+    const [contentType, mediaType] = jsonContent;
+    return {
+      statusCode,
+      contentType,
+      schema: normalizeSchema(
+        mediaType.schema as OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
+      ),
+    };
+  }
+
+  return undefined;
+}
+
 function extractCompactEndpoints(
   document: OpenAPIV3.Document,
   domain: Domain,
@@ -279,6 +326,7 @@ function extractFullEndpoints(
           };
         }
       }
+      const responseSchema = extractResponseSchema(operation.responses);
 
       results.push({
         operationId,
@@ -293,6 +341,7 @@ function extractFullEndpoints(
         tag: operation.tags?.[0] ?? "Other",
         parameters: mergedParameters,
         requestBody,
+        responseSchema,
         security:
           operation.security === undefined
             ? globalSecurity
@@ -342,6 +391,16 @@ export async function getEndpointsByIds(
 
   return specs.flatMap((document, index) =>
     extractFullEndpoints(document, domainsToSearch[index]!, requestedIds),
+  );
+}
+
+export async function getAllFullEndpoints(
+  domains: Domain[] = VALID_DOMAINS,
+): Promise<FullEndpoint[]> {
+  const specs = await Promise.all(domains.map((domain) => getDomainSpec(domain)));
+
+  return specs.flatMap((document, index) =>
+    extractFullEndpoints(document, domains[index]!),
   );
 }
 

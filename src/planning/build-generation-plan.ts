@@ -1,4 +1,5 @@
 import {
+  type CapabilityDefinition,
   endpointRequiresAuth,
   type FullEndpoint,
   type GenerationPlan,
@@ -15,6 +16,7 @@ export function buildGenerationPlan(input: {
   selectedOperationIds: string[];
   selectedWorkflows?: string[];
   resolvedWorkflowOperationIds?: string[];
+  capabilities?: CapabilityDefinition[];
   warnings?: PlanWarning[];
 }): GenerationPlan {
   const serverName = input.serverName ?? "rocket-chat-mcp-server";
@@ -61,6 +63,7 @@ export function buildGenerationPlan(input: {
     selectedWorkflows,
     resolvedWorkflowOperationIds,
     resolvedOperationIds: [...resolvedOperationIds],
+    capabilities: input.capabilities ?? [],
     warnings,
     authStrategy: {
       mode: authRequired ? "env-login" : "none",
