@@ -2,10 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
+  adjustResolvedGoal,
   listWorkflows,
   resolveGoal,
   searchEndpoints,
   suggestEndpoints,
+  type ResolvedGoal,
 } from "../../discovery/index.js";
 import {
   VALID_DOMAINS,
@@ -23,6 +25,7 @@ import {
   getAvailableDomains,
   getEndpointsByIds,
 } from "../../specs/index.js";
+import { registerGeminiServer } from "../../registration/index.js";
 import {
   analyzeMinimality,
   validateGeneratedProject,
@@ -32,10 +35,7 @@ const server = new McpServer({
   name: "rocket-chat-mcp-generator",
   version: "0.1.0",
 });
-const resolvedPlanStore = new Map<
-  string,
-  { plan: ReturnType<typeof buildGenerationPlan>; endpoints: FullEndpoint[] }
->();
+const resolvedPlanStore = new Map<string, ResolvedGoal>();
 
 function isValidDomain(value: string): value is Domain {
   return VALID_DOMAINS.includes(value as Domain);
@@ -109,10 +109,7 @@ server.registerTool(
         serverName,
         outputMode: outputMode as OutputMode | undefined,
       });
-      resolvedPlanStore.set(resolved.planId, {
-        plan: resolved.plan,
-        endpoints: resolved.endpoints,
-      });
+      resolvedPlanStore.set(resolved.planId, resolved);
 
       return {
         content: [
@@ -133,6 +130,79 @@ server.registerTool(
           {
             type: "text" as const,
             text: `Goal resolution failed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "adjust_plan",
+  {
+    description:
+      "Adjust a previously resolved plan by adding/removing endpoints or appending a new sub-goal. The plan is rebuilt in-place under the same planId.",
+    inputSchema: {
+      planId: z
+        .string()
+        .describe("Plan ID returned by resolve_goal."),
+      addOperationIds: z
+        .array(z.string())
+        .optional()
+        .describe("Rocket.Chat operationIds to add to the plan."),
+      removeOperationIds: z
+        .array(z.string())
+        .optional()
+        .describe("Rocket.Chat operationIds to remove from the plan."),
+      addGoal: z
+        .string()
+        .optional()
+        .describe("Natural-language sub-goal to resolve and merge into the existing plan."),
+    },
+  },
+  async ({ planId, addOperationIds, removeOperationIds, addGoal }) => {
+    const stored = resolvedPlanStore.get(planId);
+    if (!stored) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Unknown planId "${planId}". Call resolve_goal first to create a plan.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    try {
+      const adjusted = await adjustResolvedGoal({
+        previousGoal: stored,
+        addOperationIds,
+        removeOperationIds,
+        addGoal,
+      });
+      resolvedPlanStore.set(adjusted.planId, adjusted);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: [
+              adjusted.summary,
+              "",
+              `Plan adjusted. To generate this server, call generate_from_plan with planId "${adjusted.planId}".`,
+              ...formatWarnings(adjusted.plan.warnings),
+            ].join("\n"),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Plan adjustment failed: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
         isError: true,
@@ -517,8 +587,8 @@ server.registerTool(
     },
   },
   async ({ planId, outputDir }) => {
-    const storedPlan = resolvedPlanStore.get(planId);
-    if (!storedPlan) {
+    const stored = resolvedPlanStore.get(planId);
+    if (!stored) {
       return {
         content: [
           {
@@ -533,8 +603,8 @@ server.registerTool(
     try {
       const manifest = writeGeneratedProject({
         outputDir,
-        plan: storedPlan.plan,
-        endpoints: storedPlan.endpoints,
+        plan: stored.plan,
+        endpoints: stored.endpoints,
       });
 
       return {
@@ -546,7 +616,7 @@ server.registerTool(
               `Server name: ${manifest.serverName}`,
               `Tool count: ${manifest.toolCount}`,
               `Files written: ${manifest.filePaths.length}`,
-              ...formatWarnings(storedPlan.plan.warnings),
+              ...formatWarnings(stored.plan.warnings),
             ].join("\n"),
           },
         ],
@@ -687,6 +757,68 @@ server.registerTool(
           {
             type: "text" as const,
             text: `Minimality analysis failed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  "register_gemini_server",
+  {
+    description:
+      "Register a generated MCP server in Gemini CLI's settings.json so it can be used immediately. Call after generate_from_plan.",
+    inputSchema: {
+      serverName: z
+        .string()
+        .describe("Name for the server entry in Gemini CLI settings."),
+      projectDir: z
+        .string()
+        .describe("Absolute path to the generated MCP server project."),
+      scope: z
+        .enum(["project", "global"])
+        .optional()
+        .describe(
+          'Where to register: "project" writes to <workspaceDir>/.gemini/settings.json, "global" writes to ~/.gemini/settings.json. Defaults to "project".',
+        ),
+      workspaceDir: z
+        .string()
+        .optional()
+        .describe(
+          "Workspace root where Gemini CLI runs. Required for project scope. Defaults to the current working directory.",
+        ),
+    },
+  },
+  async ({ serverName, projectDir, scope, workspaceDir }) => {
+    try {
+      const result = registerGeminiServer({
+        serverName,
+        projectDir,
+        scope: scope as "project" | "global" | undefined,
+        workspaceDir,
+      });
+
+      const action = result.created ? "Created" : "Updated";
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: [
+              `${action} ${result.settingsPath}`,
+              `Server "${serverName}" registered for Gemini CLI.`,
+              `Run \`/mcp list\` in Gemini CLI to verify the connection.`,
+            ].join("\n"),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Registration failed: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
         isError: true,

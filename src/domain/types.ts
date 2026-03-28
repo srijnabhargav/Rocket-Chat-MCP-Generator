@@ -143,6 +143,12 @@ export interface CapabilityDefinition {
   isComposed: boolean;
 }
 
+export interface PlanConfidence {
+  level: "high" | "medium" | "low";
+  termCoverage: number;
+  signals: string[];
+}
+
 export interface PlanWarning {
   code:
     | "missing_operation_ids"

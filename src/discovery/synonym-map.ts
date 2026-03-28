@@ -40,14 +40,18 @@ export const STOP_WORDS = new Set([
 ]);
 
 export const SYNONYM_MAP: Record<string, string[]> = {
+  administer: ["manage", "create", "update", "delete", "list", "configure"],
   alert: ["message", "notify", "notification"],
   analytics: ["statistics", "metrics", "stats"],
   channel: ["channels", "room", "rooms"],
   channels: ["channel", "room", "rooms"],
   chat: ["message", "messages"],
+  configure: ["manage", "settings", "update"],
   dm: ["direct", "message", "messages"],
   direct: ["dm", "message", "messages"],
   invite: ["member", "members", "user", "users", "add"],
+  maintain: ["manage", "create", "update", "delete", "list"],
+  manage: ["create", "update", "delete", "list", "configure"],
   member: ["members", "user", "users", "invite"],
   members: ["member", "user", "users", "invite"],
   message: ["messages", "chat", "post", "alert", "notification"],

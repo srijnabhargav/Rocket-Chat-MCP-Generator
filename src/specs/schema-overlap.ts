@@ -15,9 +15,57 @@ const FIELD_ALIAS_GROUPS: Array<[string, string[]]> = [
 
 const PATH_HINT_GROUPS: Array<[string, string[]]> = [
   ["room_id", ["room", "rooms", "channel", "channels"]],
-  ["user_id", ["user", "users", "owner", "owners", "member", "members"]],
-  ["message_id", ["message", "messages"]],
+  ["user_id", ["user", "users", "owner", "owners", "member", "members", "u", "me", "createdby", "actor"]],
+  ["message_id", ["message", "messages", "lastmessage"]],
+  ["department_id", ["department", "departments"]],
+  ["team_id", ["team", "teams"]],
+  ["agent_id", ["agent", "agents"]],
+  ["visitor_id", ["visitor", "visitors", "v"]],
+  ["integration_id", ["integration", "integrations"]],
+  ["file_id", ["file", "files"]],
+  ["role_id", ["role", "roles"]],
 ];
+
+const NOISY_FIELDS = new Set([
+  "count", "offset", "total", "success",
+  "updatedat", "createdat", "ts", "lm",
+  "name", "type", "description", "status", "value", "text", "title",
+  "enabled", "active", "msg", "roles", "email", "customfields",
+  "scope", "t", "alias", "default", "encrypted", "verified",
+  "groupable", "broadcast", "visibility", "label", "showonregistration",
+  "open", "format", "method", "url", "password", "values",
+  "latest", "topic",
+]);
+
+const ENTITY_NAME_FIELDS = new Set(["room_name", "user_name"]);
+
+const ENTITY_FIELDS = new Set([
+  ...FIELD_ALIAS_GROUPS.map(([key]) => key).filter(
+    (key) => !ENTITY_NAME_FIELDS.has(key),
+  ),
+  "department_id", "team_id", "agent_id", "visitor_id",
+  "integration_id", "file_id", "role_id",
+  "teamid", "departmentid", "appid", "agentid",
+  "visitorid", "sessionid", "callid", "token",
+]);
+
+const FANOUT_THRESHOLD_RATIO = 0.20;
+
+export function isNoisyField(
+  fieldName: string,
+  fanoutSources: number,
+  fanoutTargets: number,
+  totalEndpoints: number,
+): boolean {
+  if (NOISY_FIELDS.has(fieldName)) {
+    return true;
+  }
+  if (ENTITY_FIELDS.has(fieldName)) {
+    return false;
+  }
+  const threshold = Math.ceil(totalEndpoints * FANOUT_THRESHOLD_RATIO);
+  return fanoutSources > threshold || fanoutTargets > threshold;
+}
 
 function normalizeToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -210,6 +258,10 @@ export function buildSchemaConnections(endpoints: FullEndpoint[]): SchemaConnect
   const connections = new Map<string, SchemaConnection>();
 
   for (const outputField of outputFields) {
+    if (NOISY_FIELDS.has(outputField.fieldName)) {
+      continue;
+    }
+
     for (const inputField of inputFields) {
       if (outputField.operationId === inputField.operationId) {
         continue;
@@ -238,5 +290,34 @@ export function buildSchemaConnections(endpoints: FullEndpoint[]): SchemaConnect
     }
   }
 
-  return [...connections.values()];
+  const allConnections = [...connections.values()];
+  const totalEndpoints = endpoints.length;
+
+  if (ENTITY_FIELDS.size === 0 && NOISY_FIELDS.size === 0) {
+    return allConnections;
+  }
+
+  const fanoutByField = new Map<string, { sources: Set<string>; targets: Set<string> }>();
+  for (const connection of allConnections) {
+    let stats = fanoutByField.get(connection.fieldName);
+    if (!stats) {
+      stats = { sources: new Set(), targets: new Set() };
+      fanoutByField.set(connection.fieldName, stats);
+    }
+    stats.sources.add(connection.from.operationId);
+    stats.targets.add(connection.to.operationId);
+  }
+
+  return allConnections.filter((connection) => {
+    const stats = fanoutByField.get(connection.fieldName);
+    if (!stats) {
+      return true;
+    }
+    return !isNoisyField(
+      connection.fieldName,
+      stats.sources.size,
+      stats.targets.size,
+      totalEndpoints,
+    );
+  });
 }

@@ -13,6 +13,7 @@ export {
   type GeneratedProjectManifest,
   type GenerationPlan,
   type OutputMode,
+  type PlanConfidence,
   type PlanWarning,
   type SchemaConnection,
   type SchemaConnectionConfidence,

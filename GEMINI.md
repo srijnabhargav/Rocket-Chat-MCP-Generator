@@ -20,8 +20,10 @@ Default flow for Gemini CLI:
 
 1. Call `resolve_goal` with the user's natural-language description.
 2. Show the returned plan summary to the user and confirm it.
-3. Call `generate_from_plan` with the `planId` and output directory.
-4. Validate the generated project when useful.
+3. If the user wants changes, call `adjust_plan` with the same `planId` to add/remove endpoints or append a sub-goal. Repeat until confirmed.
+4. Call `generate_from_plan` with the `planId` and output directory.
+5. Call `register_gemini_server` to register the generated server in Gemini CLI's settings so it can be used immediately.
+6. Validate the generated project when useful.
 
 Advanced flow for fine-grained control:
 

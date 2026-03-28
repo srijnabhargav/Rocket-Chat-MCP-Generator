@@ -5,4 +5,4 @@ export {
   getEndpointsByIds,
   getSpecStats,
 } from "./catalog.js";
-export { buildSchemaConnections, extractEndpointFields } from "./schema-overlap.js";
+export { buildSchemaConnections, extractEndpointFields, isNoisyField } from "./schema-overlap.js";

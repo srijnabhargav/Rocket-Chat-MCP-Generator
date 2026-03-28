@@ -132,6 +132,62 @@ export const channelsListEndpoint: FullEndpoint = {
   },
 };
 
+export const usersListEndpoint: FullEndpoint = {
+  operationId: "get-api-v1-users_list",
+  method: "GET",
+  path: "/api/v1/users.list",
+  summary: "List users",
+  description: "List workspace users.",
+  domain: "user-management",
+  tag: "Users",
+  parameters: [
+    {
+      name: "count",
+      in: "query",
+      required: false,
+      schema: { type: "number" },
+    },
+    {
+      name: "offset",
+      in: "query",
+      required: false,
+      schema: { type: "number" },
+    },
+  ],
+  responseSchema: {
+    statusCode: "200",
+    contentType: "application/json",
+    schema: {
+      type: "object",
+      properties: {
+        users: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              _id: { type: "string" },
+              name: { type: "string" },
+              username: { type: "string" },
+              status: { type: "string" },
+            },
+          },
+        },
+        count: { type: "number" },
+        offset: { type: "number" },
+        total: { type: "number" },
+      },
+    },
+  },
+  security: [{ userAuth: [] }],
+  inputSchema: {
+    type: "object",
+    properties: {
+      count: { type: "number" },
+      offset: { type: "number" },
+    },
+  },
+};
+
 export const postMessageEndpoint: FullEndpoint = {
   operationId: "post-api-v1-chat_postMessage",
   method: "POST",
