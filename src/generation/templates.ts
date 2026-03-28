@@ -1,5 +1,4 @@
 import {
-  endpointRequiresAuth,
   type FullEndpoint,
   type OutputMode,
   type WorkflowInputMapping,
@@ -54,7 +53,7 @@ function buildToolHandler(endpoint: FullEndpoint): string {
   );
   const options: string[] = [];
 
-  if (endpointRequiresAuth(endpoint)) {
+  if (endpoint.operationId !== "post-api-v1-login") {
     options.push("auth: true");
   }
   if (endpoint.requestBody) {
@@ -406,18 +405,12 @@ export function generateWorkflowToolFile(workflow: WorkflowToolSource): string {
         `    const ${varName} = getValueAtPath(parsedResults["${mapping.sourceStepId}"], "${mapping.sourcePath}");`,
       );
       handlerLines.push(
-        `    if (${varName} === undefined) {`,
+        `    if (${varName} !== undefined) {`,
       );
-      handlerLines.push(`      return {`);
       handlerLines.push(
-        `        content: [{ type: "text", text: JSON.stringify({ failedStep: "${step.id}", missingMapping: "${mapping.sourceStepId}.${mapping.sourcePath}", targetPath: "${mapping.targetPath}", results }, null, 2) }],`,
+        `      setValueAtPath(stepArgs${index}, "${mapping.targetPath}", ${varName});`,
       );
-      handlerLines.push(`        isError: true,`);
-      handlerLines.push(`      };`);
       handlerLines.push(`    }`);
-      handlerLines.push(
-        `    setValueAtPath(stepArgs${index}, "${mapping.targetPath}", ${varName});`,
-      );
     }
     handlerLines.push(
       `    const stepResult${index} = await stepTool${index}.handler(stepArgs${index});`,

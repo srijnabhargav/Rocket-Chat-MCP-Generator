@@ -8,7 +8,28 @@ import {
 } from "../domain/index.js";
 import type { DependencyGraph } from "./dependency-graph.js";
 
-const MAX_CAPABILITY_STEPS = 5;
+const MAX_CAPABILITY_STEPS = 3;
+
+const ENTITY_ID_FIELD_NAMES = new Set([
+  "room_id", "user_id", "message_id", "team_id",
+  "department_id", "agent_id", "visitor_id",
+  "integration_id", "file_id", "role_id",
+]);
+
+function normalizeFieldName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "_");
+}
+
+function isEntityIdField(fieldName: string): boolean {
+  if (ENTITY_ID_FIELD_NAMES.has(fieldName)) {
+    return true;
+  }
+  const normalized = normalizeFieldName(fieldName);
+  if (ENTITY_ID_FIELD_NAMES.has(normalized)) {
+    return true;
+  }
+  return /(?:room|user|message|team|department|agent|visitor|integration|file|role)[_]?id$/i.test(fieldName);
+}
 
 const CONFIDENCE_SCORE: Record<SchemaConnectionConfidence, number> = {
   exact: 3,
@@ -247,6 +268,77 @@ function splitOversizedComponent(
   return chunks;
 }
 
+function isStrongDataDependency(
+  connection: SchemaConnection,
+  endpointsById: Map<string, FullEndpoint>,
+): boolean {
+  const from = endpointsById.get(connection.from.operationId);
+  const to = endpointsById.get(connection.to.operationId);
+  if (!from || !to) {
+    return false;
+  }
+
+  if (from.method !== "GET") {
+    return false;
+  }
+
+  if (to.method === "GET") {
+    return false;
+  }
+
+  if (!isEntityIdField(connection.fieldName)) {
+    return false;
+  }
+
+  if (connection.from.direction !== "output" || connection.to.direction !== "input") {
+    return false;
+  }
+
+  if (connection.confidence === "possible") {
+    return false;
+  }
+
+  return true;
+}
+
+function splitComponentByWriteEndpoint(
+  component: string[],
+  endpointsById: Map<string, FullEndpoint>,
+  adjacency: Map<string, Set<string>>,
+): string[][] {
+  const writeIds = component.filter((id) => {
+    const ep = endpointsById.get(id);
+    return ep && ep.method !== "GET";
+  });
+
+  if (writeIds.length <= 1) {
+    return [component];
+  }
+
+  const result: string[][] = [];
+  const assignedGetIds = new Set<string>();
+
+  for (const writeId of writeIds) {
+    const neighbors = adjacency.get(writeId) ?? new Set();
+    const getPrereqs = [...neighbors].filter((id) => {
+      const ep = endpointsById.get(id);
+      return ep && ep.method === "GET";
+    });
+    result.push([...getPrereqs, writeId]);
+    getPrereqs.forEach((id) => assignedGetIds.add(id));
+  }
+
+  const orphanGets = component.filter((id) => {
+    const ep = endpointsById.get(id);
+    return ep && ep.method === "GET" && !assignedGetIds.has(id);
+  });
+  for (const getId of orphanGets) {
+    result.push([getId]);
+  }
+
+  return result;
+}
+
 function collectComponents(
   endpointIds: string[],
   graph: DependencyGraph,
@@ -266,11 +358,15 @@ function collectComponents(
       continue;
     }
 
+    if (!isStrongDataDependency(connection, graph.endpointsById)) {
+      continue;
+    }
+
     adjacency.get(connection.from.operationId)?.add(connection.to.operationId);
     adjacency.get(connection.to.operationId)?.add(connection.from.operationId);
   }
 
-  const components: string[][] = [];
+  const rawComponents: string[][] = [];
   const visited = new Set<string>();
   for (const endpointId of endpointIds) {
     if (visited.has(endpointId)) {
@@ -292,10 +388,12 @@ function collectComponents(
         }
       }
     }
-    components.push(component);
+    rawComponents.push(component);
   }
 
-  return components;
+  return rawComponents.flatMap((component) =>
+    splitComponentByWriteEndpoint(component, graph.endpointsById, adjacency),
+  );
 }
 
 export function groupCapabilities(input: {
@@ -311,11 +409,14 @@ export function groupCapabilities(input: {
     splitOversizedComponent(component, input.graph),
   );
 
-  return components.map((component, index) => {
+  return components.flatMap((component, index) => {
     const componentEndpoints = component
       .map((operationId) => input.graph.endpointsById.get(operationId))
       .filter((endpoint): endpoint is FullEndpoint => Boolean(endpoint))
       .sort(compareEndpoints);
+    if (componentEndpoints.length === 0) {
+      return [];
+    }
     const primaryEndpoint = choosePrimaryEndpoint(componentEndpoints, preferredIds);
     const relevantFlows = input.graph.connections.filter(
       (connection) =>
@@ -358,7 +459,7 @@ export function groupCapabilities(input: {
             .map((endpoint) => endpoint.summary || endpoint.operationId)
             .join(" -> ")}`;
 
-    return {
+    return [{
       name,
       description,
       endpoints: componentOperationIds,
@@ -367,6 +468,6 @@ export function groupCapabilities(input: {
       dataFlows: relevantFlows,
       steps: orderedSteps,
       isComposed: orderedSteps.length > 1,
-    };
+    }];
   });
 }

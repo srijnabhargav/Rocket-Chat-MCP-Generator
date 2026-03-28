@@ -29,6 +29,12 @@ interface SuggestionCandidate {
 
 const LOGIN_OPERATION_ID = "post-api-v1-login";
 
+const DEPRIORITIZED_OPERATION_IDS = new Set([
+  "get-api-v1-channels_anonymousread",
+  "get-api-v1-settings_public",
+  "post-api-v1-downloadPublicImportFile",
+]);
+
 let cachedEndpointsPromise: Promise<CompactEndpoint[]> | null = null;
 
 async function loadEndpoints(): Promise<CompactEndpoint[]> {
@@ -127,6 +133,10 @@ function scoreEndpoints(
             matchedTerms.add(originalToken);
           }
         }
+      }
+
+      if (DEPRIORITIZED_OPERATION_IDS.has(endpoint.operationId)) {
+        score *= 0.1;
       }
 
       return { endpoint, score, matchedTerms };

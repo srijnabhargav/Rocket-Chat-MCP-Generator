@@ -69,7 +69,19 @@ export function registerGeminiServer(
 
   const mcpServers =
     (settings.mcpServers as Record<string, unknown> | undefined) ?? {};
-  mcpServers[input.serverName] = buildGeminiServerEntry(input.projectDir);
+  const newEntry = buildGeminiServerEntry(input.projectDir);
+  const newCwd = newEntry.cwd;
+  for (const [name, entry] of Object.entries(mcpServers)) {
+    if (
+      name !== input.serverName &&
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>).cwd === newCwd
+    ) {
+      delete mcpServers[name];
+    }
+  }
+  mcpServers[input.serverName] = newEntry;
   settings.mcpServers = mcpServers;
 
   mkdirSync(dirname(settingsPath), { recursive: true });

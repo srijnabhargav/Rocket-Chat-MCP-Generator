@@ -129,7 +129,7 @@ describe("generateProjectFiles", () => {
     }
   });
 
-  it("prefers capability-shaped tools when capabilities are present", () => {
+  it("exposes all endpoints as standalone tools alongside capabilities", () => {
     const graph = buildDependencyGraph([
       channelsListEndpoint,
       postMessageEndpoint,
@@ -158,8 +158,8 @@ describe("generateProjectFiles", () => {
 
     assert.ok(files["src/tools/post_message.ts"]);
     assert.ok(files["src/tools/post-api-v1-chat_postMessage.ts"]);
-    assert.ok(!files["src/tests/post-api-v1-chat_postMessage.test.ts"]);
+    assert.ok(files["src/tests/post-api-v1-chat_postMessage.test.ts"]);
     assert.match(files["src/tools/index.ts"], /post_message/);
-    assert.doesNotMatch(files["src/tools/index.ts"], /post-api-v1-chat_postMessage/);
+    assert.match(files["src/tools/index.ts"], /post-api-v1-chat_postMessage/);
   });
 });

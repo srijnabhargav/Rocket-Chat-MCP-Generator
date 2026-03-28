@@ -178,13 +178,14 @@ export function generateProjectFiles(
 ): Record<string, string> {
   const workflowTargets = resolveWorkflowTargets(plan, endpoints);
   const capabilityTargets = resolveCapabilityTargets(plan, endpoints);
-  const exposeEndpointTools = capabilityTargets.length === 0;
-  const exposedTargets = capabilityTargets.length > 0 ? capabilityTargets : workflowTargets;
+  const hasCapabilities = capabilityTargets.length > 0;
+  const exposedTargets = hasCapabilities ? capabilityTargets : workflowTargets;
   const generatedTargets = [...workflowTargets, ...capabilityTargets];
+
   const toolDescriptors = buildToolDescriptors(
     endpoints,
     exposedTargets,
-    exposeEndpointTools,
+    true,
   );
 
   const files: Record<string, string> = {
@@ -202,9 +203,7 @@ export function generateProjectFiles(
 
   for (const endpoint of endpoints) {
     files[`src/tools/${endpoint.operationId}.ts`] = generateToolFile(endpoint);
-    if (exposeEndpointTools) {
-      files[`src/tests/${endpoint.operationId}.test.ts`] = generateToolTest(endpoint);
-    }
+    files[`src/tests/${endpoint.operationId}.test.ts`] = generateToolTest(endpoint);
   }
 
   for (const workflow of generatedTargets) {
@@ -236,7 +235,7 @@ export function writeGeneratedProject(input: {
   const capabilityTargets = resolveCapabilityTargets(input.plan, input.endpoints);
   const toolCount =
     capabilityTargets.length > 0
-      ? capabilityTargets.length
+      ? capabilityTargets.length + input.endpoints.length
       : input.endpoints.length + workflowTargets.length;
 
   const toolsDir = join(projectDir, "src", "tools");

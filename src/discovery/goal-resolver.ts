@@ -36,7 +36,11 @@ async function loadAllEndpoints(): Promise<FullEndpoint[]> {
   return cachedAllEndpointsPromise;
 }
 
-function chooseSuggestions(suggestions: SuggestionResult[]): SuggestionResult[] {
+function chooseSuggestions(
+  suggestions: SuggestionResult[],
+  goalTermCount = Infinity,
+): SuggestionResult[] {
+  const maxSuggestions = goalTermCount <= 2 ? 1 : 2;
   const chosen: SuggestionResult[] = [];
   const coveredTerms = new Set<string>();
   const coveredDomains = new Set<string>();
@@ -49,7 +53,7 @@ function chooseSuggestions(suggestions: SuggestionResult[]): SuggestionResult[] 
       suggestion.matchedTerms.forEach((term) => coveredTerms.add(term));
       suggestion.domains.forEach((domain) => coveredDomains.add(domain));
     }
-    if (chosen.length >= 2) {
+    if (chosen.length >= maxSuggestions) {
       break;
     }
   }
@@ -323,7 +327,7 @@ function findBestLookupByPattern(
   return null;
 }
 
-const MAX_SELECTED_OPERATION_IDS = 8;
+const MAX_SELECTED_OPERATION_IDS = 6;
 const MAX_CRUD_CLUSTER_SIZE = 6;
 
 const MANAGE_VERBS = new Set([
@@ -485,7 +489,7 @@ function selectOperationIds(input: {
     }
   }
 
-  const selectedSuggestions = chooseSuggestions(input.suggestions);
+  const selectedSuggestions = chooseSuggestions(input.suggestions, goalTerms.length);
 
   const workflowSuggestions = selectedSuggestions.filter(
     (suggestion) => (suggestion.workflowNames?.length ?? 0) > 0,
@@ -796,6 +800,14 @@ export async function adjustResolvedGoal(input: {
   );
 
   if (input.addOperationIds) {
+    const allEndpoints = await loadAllEndpoints();
+    const knownIds = new Set(allEndpoints.map((ep) => ep.operationId));
+    const unknownIds = input.addOperationIds.filter((id) => !knownIds.has(id));
+    if (unknownIds.length > 0) {
+      throw new Error(
+        `Unknown operationIds: ${unknownIds.join(", ")}. Use search_endpoints to find valid IDs.`,
+      );
+    }
     for (const id of input.addOperationIds) {
       previousSelectedIds.add(id);
     }
