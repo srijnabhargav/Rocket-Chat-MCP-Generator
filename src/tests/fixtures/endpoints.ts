@@ -188,6 +188,54 @@ export const usersListEndpoint: FullEndpoint = {
   },
 };
 
+export const channelsInfoEndpoint: FullEndpoint = {
+  operationId: "get-api-v1-channels_info",
+  method: "GET",
+  path: "/api/v1/channels.info",
+  summary: "Get channel info",
+  description: "Get information about a channel.",
+  domain: "rooms",
+  tag: "Channels",
+  parameters: [
+    {
+      name: "roomId",
+      in: "query",
+      required: false,
+      schema: { type: "string" },
+    },
+    {
+      name: "roomName",
+      in: "query",
+      required: false,
+      schema: { type: "string" },
+    },
+  ],
+  responseSchema: {
+    statusCode: "200",
+    contentType: "application/json",
+    schema: {
+      type: "object",
+      properties: {
+        channel: {
+          type: "object",
+          properties: {
+            _id: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+  security: [{ userAuth: [] }],
+  inputSchema: {
+    type: "object",
+    properties: {
+      roomId: { type: "string" },
+      roomName: { type: "string" },
+    },
+  },
+};
+
 export const postMessageEndpoint: FullEndpoint = {
   operationId: "post-api-v1-chat_postMessage",
   method: "POST",

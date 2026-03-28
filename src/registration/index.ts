@@ -1,5 +1,6 @@
 export {
   buildGeminiServerEntry,
+  installProjectDependencies,
   registerGeminiServer,
   type GeminiServerEntry,
   type RegisterGeminiServerInput,

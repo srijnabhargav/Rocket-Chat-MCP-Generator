@@ -12,13 +12,24 @@ function createWorkflowDefinition(
 const WORKFLOW_CATALOG: WorkflowDefinition[] = [
   createWorkflowDefinition({
     name: "send_channel_message",
-    description: "Post a message to a Rocket.Chat channel.",
-    domains: ["messaging"],
+    description: "Look up a channel and post a message to it.",
+    domains: ["rooms", "messaging"],
     steps: [
+      {
+        id: "lookup_channel",
+        operationId: "get-api-v1-channels_info",
+        inputMappings: [],
+      },
       {
         id: "post_message",
         operationId: "post-api-v1-chat_postMessage",
-        inputMappings: [],
+        inputMappings: [
+          {
+            targetPath: "requestBody.channel",
+            sourceStepId: "lookup_channel",
+            sourcePath: "channel._id",
+          },
+        ],
       },
     ],
   }),
@@ -53,12 +64,17 @@ const WORKFLOW_CATALOG: WorkflowDefinition[] = [
   }),
   createWorkflowDefinition({
     name: "send_alerts_from_statistics",
-    description: "Read workspace statistics and send alert messages.",
-    domains: ["statistics", "messaging"],
+    description: "Read workspace statistics and send alert messages to a channel.",
+    domains: ["statistics", "rooms", "messaging"],
     steps: [
       {
         id: "fetch_statistics",
         operationId: "get-api-v1-statistics",
+        inputMappings: [],
+      },
+      {
+        id: "lookup_channel",
+        operationId: "get-api-v1-channels_info",
         inputMappings: [],
       },
       {
@@ -69,6 +85,11 @@ const WORKFLOW_CATALOG: WorkflowDefinition[] = [
             targetPath: "requestBody.text",
             sourceStepId: "fetch_statistics",
             sourcePath: "totalUsers",
+          },
+          {
+            targetPath: "requestBody.channel",
+            sourceStepId: "lookup_channel",
+            sourcePath: "channel._id",
           },
         ],
       },

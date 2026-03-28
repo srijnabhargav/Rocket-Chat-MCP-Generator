@@ -19,9 +19,11 @@ describe("discovery layer", () => {
     );
     assert.ok(mappedWorkflow);
     assert.equal(mappedWorkflow.steps[0]?.id, "fetch_statistics");
-    assert.equal(mappedWorkflow.steps[1]?.id, "post_alert");
+    assert.equal(mappedWorkflow.steps[1]?.id, "lookup_channel");
+    const alertStep = mappedWorkflow.steps.find((s) => s.id === "post_alert");
+    assert.ok(alertStep, "must include a post_alert step");
     assert.equal(
-      mappedWorkflow.steps[1]?.inputMappings[0]?.targetPath,
+      alertStep.inputMappings[0]?.targetPath,
       "requestBody.text",
     );
   });

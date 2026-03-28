@@ -20,10 +20,11 @@ describe("end-to-end generation", () => {
   it("generates, validates, installs, compiles, and tests a workflow-backed project from real Rocket.Chat endpoints", async () => {
     const initialEndpoints = await getEndpointsByIds([
       "get-api-v1-statistics",
+      "get-api-v1-channels_info",
       "post-api-v1-chat_postMessage",
     ]);
 
-    assert.ok(initialEndpoints.length >= 2);
+    assert.ok(initialEndpoints.length >= 3);
 
     const plan = buildGenerationPlan({
       serverName: "workflow-e2e-server",

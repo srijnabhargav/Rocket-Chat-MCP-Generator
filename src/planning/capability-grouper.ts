@@ -2,10 +2,19 @@ import {
   type CapabilityDefinition,
   type FullEndpoint,
   type SchemaConnection,
+  type SchemaConnectionConfidence,
   type WorkflowInputMapping,
   type WorkflowStepDefinition,
 } from "../domain/index.js";
 import type { DependencyGraph } from "./dependency-graph.js";
+
+const MAX_CAPABILITY_STEPS = 5;
+
+const CONFIDENCE_SCORE: Record<SchemaConnectionConfidence, number> = {
+  exact: 3,
+  likely: 2,
+  possible: 1,
+};
 
 function slugify(value: string): string {
   const slug = value
@@ -91,6 +100,7 @@ function buildInputMappings(
     orderedSteps.map((orderedStep) => [orderedStep.operationId, orderedStep.id]),
   );
 
+  const seenTargets = new Set<string>();
   return dataFlows
     .filter((flow) => flow.to.operationId === step.operationId)
     .flatMap((flow) => {
@@ -98,6 +108,10 @@ function buildInputMappings(
       if (!sourceStepId) {
         return [];
       }
+      if (seenTargets.has(flow.to.fieldPath)) {
+        return [];
+      }
+      seenTargets.add(flow.to.fieldPath);
 
       return [
         {
@@ -107,6 +121,130 @@ function buildInputMappings(
         },
       ];
     });
+}
+
+interface WeightedEdge {
+  a: string;
+  b: string;
+  weight: number;
+}
+
+function scoreEdge(
+  connection: SchemaConnection,
+  endpointsById: Map<string, FullEndpoint>,
+): number {
+  let weight = CONFIDENCE_SCORE[connection.confidence];
+  const from = endpointsById.get(connection.from.operationId);
+  const to = endpointsById.get(connection.to.operationId);
+  if (from && to && from.domain === to.domain) {
+    weight += 4;
+  }
+  return weight;
+}
+
+function buildComponentEdges(
+  component: string[],
+  graph: DependencyGraph,
+): WeightedEdge[] {
+  const memberSet = new Set(component);
+  const edgeMap = new Map<string, WeightedEdge>();
+
+  for (const connection of graph.connections) {
+    const a = connection.from.operationId;
+    const b = connection.to.operationId;
+    if (!memberSet.has(a) || !memberSet.has(b)) {
+      continue;
+    }
+    const key = a < b ? `${a}::${b}` : `${b}::${a}`;
+    const existing = edgeMap.get(key);
+    const weight = scoreEdge(connection, graph.endpointsById);
+    if (!existing || weight > existing.weight) {
+      edgeMap.set(key, { a: a < b ? a : b, b: a < b ? b : a, weight });
+    }
+  }
+
+  return [...edgeMap.values()];
+}
+
+function bfsComponent(start: string, adjacency: Map<string, Set<string>>): Set<string> {
+  const visited = new Set<string>();
+  const queue = [start];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    for (const neighbor of adjacency.get(current) ?? []) {
+      if (!visited.has(neighbor)) {
+        queue.push(neighbor);
+      }
+    }
+  }
+  return visited;
+}
+
+function splitByDomain(
+  component: string[],
+  endpointsById: Map<string, FullEndpoint>,
+): string[][] {
+  const byDomain = new Map<string, string[]>();
+  for (const id of component) {
+    const domain = endpointsById.get(id)?.domain ?? "unknown";
+    const group = byDomain.get(domain) ?? [];
+    group.push(id);
+    byDomain.set(domain, group);
+  }
+  return [...byDomain.values()];
+}
+
+function splitOversizedComponent(
+  component: string[],
+  graph: DependencyGraph,
+): string[][] {
+  if (component.length <= MAX_CAPABILITY_STEPS) {
+    return [component];
+  }
+
+  const edges = buildComponentEdges(component, graph);
+  const sorted = edges.slice().sort((a, b) => a.weight - b.weight);
+
+  for (const weakest of sorted) {
+    const adjacency = new Map<string, Set<string>>();
+    for (const id of component) {
+      adjacency.set(id, new Set());
+    }
+    for (const edge of edges) {
+      if (edge === weakest) {
+        continue;
+      }
+      adjacency.get(edge.a)?.add(edge.b);
+      adjacency.get(edge.b)?.add(edge.a);
+    }
+
+    const firstPart = bfsComponent(component[0]!, adjacency);
+    if (firstPart.size === component.length) {
+      continue;
+    }
+
+    const partA = component.filter((id) => firstPart.has(id));
+    const partB = component.filter((id) => !firstPart.has(id));
+    return [
+      ...splitOversizedComponent(partA, graph),
+      ...splitOversizedComponent(partB, graph),
+    ];
+  }
+
+  const domainGroups = splitByDomain(component, graph.endpointsById);
+  if (domainGroups.length > 1) {
+    return domainGroups.flatMap((group) => splitOversizedComponent(group, graph));
+  }
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < component.length; i += MAX_CAPABILITY_STEPS) {
+    chunks.push(component.slice(i, i + MAX_CAPABILITY_STEPS));
+  }
+  return chunks;
 }
 
 function collectComponents(
@@ -168,7 +306,12 @@ export function groupCapabilities(input: {
   const preferredIds = new Set(input.preferredOperationIds);
   const usedNames = new Set<string>();
 
-  return collectComponents(input.endpointIds, input.graph).map((component, index) => {
+  const rawComponents = collectComponents(input.endpointIds, input.graph);
+  const components = rawComponents.flatMap((component) =>
+    splitOversizedComponent(component, input.graph),
+  );
+
+  return components.map((component, index) => {
     const componentEndpoints = component
       .map((operationId) => input.graph.endpointsById.get(operationId))
       .filter((endpoint): endpoint is FullEndpoint => Boolean(endpoint))

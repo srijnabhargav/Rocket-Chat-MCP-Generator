@@ -773,7 +773,7 @@ server.registerTool(
     inputSchema: {
       serverName: z
         .string()
-        .describe("Name for the server entry in Gemini CLI settings."),
+        .describe("Human-readable kebab-case name for the server entry in Gemini CLI settings (e.g. 'rocket-chat-messaging'). Do NOT use the planId here."),
       projectDir: z
         .string()
         .describe("Absolute path to the generated MCP server project."),
@@ -801,15 +801,19 @@ server.registerTool(
       });
 
       const action = result.created ? "Created" : "Updated";
+      const lines = [
+        `${action} ${result.settingsPath}`,
+        `Server "${serverName}" registered for Gemini CLI.`,
+      ];
+      if (result.dependenciesInstalled) {
+        lines.push("Dependencies installed via npm install.");
+      }
+      lines.push("Run `/mcp list` in Gemini CLI to verify the connection.");
       return {
         content: [
           {
             type: "text" as const,
-            text: [
-              `${action} ${result.settingsPath}`,
-              `Server "${serverName}" registered for Gemini CLI.`,
-              `Run \`/mcp list\` in Gemini CLI to verify the connection.`,
-            ].join("\n"),
+            text: lines.join("\n"),
           },
         ],
       };

@@ -400,12 +400,13 @@ export function generateWorkflowToolFile(workflow: WorkflowToolSource): string {
     handlerLines.push(
       `    const stepArgs${index} = cloneArgs(workflowArgs["${step.id}"] as Record<string, unknown> | undefined);`,
     );
-    for (const mapping of step.inputMappings) {
+    for (const [mappingIndex, mapping] of step.inputMappings.entries()) {
+      const varName = `mappedValue${index}_${mappingIndex}_${mapping.targetPath.replace(/[^a-zA-Z0-9]/g, "_")}`;
       handlerLines.push(
-        `    const mappedValue${index}_${mapping.targetPath.replace(/[^a-zA-Z0-9]/g, "_")} = getValueAtPath(parsedResults["${mapping.sourceStepId}"], "${mapping.sourcePath}");`,
+        `    const ${varName} = getValueAtPath(parsedResults["${mapping.sourceStepId}"], "${mapping.sourcePath}");`,
       );
       handlerLines.push(
-        `    if (mappedValue${index}_${mapping.targetPath.replace(/[^a-zA-Z0-9]/g, "_")} === undefined) {`,
+        `    if (${varName} === undefined) {`,
       );
       handlerLines.push(`      return {`);
       handlerLines.push(
@@ -415,7 +416,7 @@ export function generateWorkflowToolFile(workflow: WorkflowToolSource): string {
       handlerLines.push(`      };`);
       handlerLines.push(`    }`);
       handlerLines.push(
-        `    setValueAtPath(stepArgs${index}, "${mapping.targetPath}", mappedValue${index}_${mapping.targetPath.replace(/[^a-zA-Z0-9]/g, "_")});`,
+        `    setValueAtPath(stepArgs${index}, "${mapping.targetPath}", ${varName});`,
       );
     }
     handlerLines.push(

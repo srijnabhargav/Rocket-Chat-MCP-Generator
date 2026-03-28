@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   type FullEndpoint,
@@ -239,8 +239,21 @@ export function writeGeneratedProject(input: {
       ? capabilityTargets.length
       : input.endpoints.length + workflowTargets.length;
 
-  mkdirSync(join(projectDir, "src", "tools"), { recursive: true });
-  mkdirSync(join(projectDir, "src", "tests"), { recursive: true });
+  const toolsDir = join(projectDir, "src", "tools");
+  const testsDir = join(projectDir, "src", "tests");
+
+  for (const dir of [toolsDir, testsDir]) {
+    if (existsSync(dir)) {
+      for (const entry of readdirSync(dir)) {
+        if (entry.endsWith(".ts")) {
+          rmSync(join(dir, entry));
+        }
+      }
+    }
+  }
+
+  mkdirSync(toolsDir, { recursive: true });
+  mkdirSync(testsDir, { recursive: true });
 
   for (const [relativePath, content] of Object.entries(files)) {
     writeFileSync(join(projectDir, relativePath), content, "utf-8");

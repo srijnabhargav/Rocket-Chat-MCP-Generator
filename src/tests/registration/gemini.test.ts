@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   buildGeminiServerEntry,
+  installProjectDependencies,
   registerGeminiServer,
 } from "../../registration/index.js";
 
@@ -30,9 +31,11 @@ describe("registerGeminiServer", () => {
       projectDir: "/tmp/generated-project",
       scope: "project",
       workspaceDir: workspace,
+      installDependencies: false,
     });
 
     assert.equal(result.created, true);
+    assert.equal(result.dependenciesInstalled, false);
     assert.ok(existsSync(result.settingsPath));
 
     const settings = JSON.parse(readFileSync(result.settingsPath, "utf-8"));
@@ -70,6 +73,7 @@ describe("registerGeminiServer", () => {
       projectDir: "/tmp/new-project",
       scope: "project",
       workspaceDir: workspace,
+      installDependencies: false,
     });
 
     assert.equal(result.created, false);
@@ -97,6 +101,7 @@ describe("registerGeminiServer", () => {
       projectDir: "/tmp/proj",
       scope: "project",
       workspaceDir: workspace,
+      installDependencies: false,
     });
 
     const expected = join(workspace, ".gemini", "settings.json");
@@ -113,6 +118,7 @@ describe("registerGeminiServer", () => {
       projectDir: "/tmp/global-proj",
       scope: "global",
       _homeDir: fakeHome,
+      installDependencies: false,
     });
 
     const expected = join(fakeHome, ".gemini", "settings.json");
@@ -137,6 +143,7 @@ describe("registerGeminiServer", () => {
       projectDir: "/tmp/old-path",
       scope: "project",
       workspaceDir: workspace,
+      installDependencies: false,
     });
 
     const result = registerGeminiServer({
@@ -144,6 +151,7 @@ describe("registerGeminiServer", () => {
       projectDir: "/tmp/new-path",
       scope: "project",
       workspaceDir: workspace,
+      installDependencies: false,
     });
 
     assert.equal(result.created, false);
@@ -156,5 +164,66 @@ describe("registerGeminiServer", () => {
     );
 
     rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("installs dependencies when node_modules is missing", () => {
+    const workspace = makeTempDir();
+    const projectDir = makeTempDir();
+    writeFileSync(
+      join(projectDir, "package.json"),
+      JSON.stringify({
+        name: "test-install",
+        version: "1.0.0",
+        dependencies: { "is-number": "^7.0.0" },
+      }),
+      "utf-8",
+    );
+
+    const result = registerGeminiServer({
+      serverName: "install-test",
+      projectDir,
+      scope: "project",
+      workspaceDir: workspace,
+    });
+
+    assert.equal(result.dependenciesInstalled, true);
+    assert.ok(existsSync(join(projectDir, "node_modules")));
+
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("skips npm install when node_modules already exists", () => {
+    const workspace = makeTempDir();
+    const projectDir = makeTempDir();
+    writeFileSync(
+      join(projectDir, "package.json"),
+      JSON.stringify({ name: "test-skip", version: "1.0.0" }),
+      "utf-8",
+    );
+    mkdirSync(join(projectDir, "node_modules"), { recursive: true });
+
+    const result = registerGeminiServer({
+      serverName: "skip-install-test",
+      projectDir,
+      scope: "project",
+      workspaceDir: workspace,
+    });
+
+    assert.equal(result.dependenciesInstalled, false);
+
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+});
+
+describe("installProjectDependencies", () => {
+  it("throws when package.json is missing", () => {
+    const emptyDir = makeTempDir();
+    assert.throws(
+      () => installProjectDependencies(emptyDir),
+      /No package\.json found/,
+    );
+    rmSync(emptyDir, { recursive: true, force: true });
   });
 });

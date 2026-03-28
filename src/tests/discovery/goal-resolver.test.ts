@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PlanConfidence } from "../../domain/index.js";
-import { adjustResolvedGoal, resolveGoal } from "../../discovery/index.js";
+import { adjustResolvedGoal, injectPrerequisiteLookups, resolveGoal } from "../../discovery/index.js";
+import { buildDependencyGraph } from "../../planning/index.js";
+import { getAllFullEndpoints } from "../../specs/index.js";
 
 describe("goal resolver", () => {
   it("returns a deterministic plan for natural-language goals", async () => {
@@ -321,6 +323,143 @@ describe("adjustResolvedGoal", () => {
           removeOperationIds: base.plan.selectedOperationIds,
         }),
       /empty operation set/,
+    );
+  });
+});
+
+describe("injectPrerequisiteLookups", () => {
+  it("injects a channel-lookup endpoint for sendMessage", async () => {
+    const allEndpoints = await getAllFullEndpoints();
+    const graph = buildDependencyGraph(allEndpoints);
+
+    const result = injectPrerequisiteLookups({
+      selectedIds: ["post-api-v1-chat_sendMessage"],
+      graph,
+    });
+
+    assert.ok(
+      result.some((id) => /channels[._-]info|rooms[._-]info/i.test(id)),
+      `must inject a channel/room lookup endpoint, got: ${result.join(", ")}`,
+    );
+    assert.ok(
+      result.includes("post-api-v1-chat_sendMessage"),
+      "original selection must be preserved",
+    );
+  });
+
+  it("injects a channel-lookup endpoint for postMessage via schema scan", async () => {
+    const allEndpoints = await getAllFullEndpoints();
+    const graph = buildDependencyGraph(allEndpoints);
+
+    const result = injectPrerequisiteLookups({
+      selectedIds: ["post-api-v1-chat_postMessage"],
+      graph,
+    });
+
+    assert.ok(
+      result.some((id) => /channels[._-]info|rooms[._-]info/i.test(id)),
+      `must inject a channel/room lookup endpoint, got: ${result.join(", ")}`,
+    );
+    assert.ok(result.length > 1, "must inject at least one lookup");
+  });
+
+  it("does not inject lookups for GET-only selections", async () => {
+    const allEndpoints = await getAllFullEndpoints();
+    const graph = buildDependencyGraph(allEndpoints);
+
+    const result = injectPrerequisiteLookups({
+      selectedIds: ["get-api-v1-statistics"],
+      graph,
+    });
+
+    assert.deepEqual(
+      result,
+      ["get-api-v1-statistics"],
+      "GET-only selection must not be modified",
+    );
+  });
+
+  it("does not duplicate an already-selected lookup endpoint", async () => {
+    const allEndpoints = await getAllFullEndpoints();
+    const graph = buildDependencyGraph(allEndpoints);
+
+    const result = injectPrerequisiteLookups({
+      selectedIds: ["post-api-v1-chat_sendMessage", "get-api-v1-channels_info"],
+      graph,
+    });
+
+    const channelInfoCount = result.filter((id) => id === "get-api-v1-channels_info").length;
+    assert.equal(channelInfoCount, 1, "must not duplicate channels_info");
+  });
+
+  it("caps injected lookups at the maximum", async () => {
+    const allEndpoints = await getAllFullEndpoints();
+    const graph = buildDependencyGraph(allEndpoints);
+
+    const writeOps = [...graph.endpointsById.values()]
+      .filter((ep) => ep.method !== "GET")
+      .slice(0, 10)
+      .map((ep) => ep.operationId);
+
+    const result = injectPrerequisiteLookups({
+      selectedIds: writeOps,
+      graph,
+    });
+
+    const injectedCount = result.length - writeOps.length;
+    assert.ok(injectedCount <= 3, `injected ${injectedCount} lookups, expected <= 3`);
+  });
+});
+
+describe("resolveGoal with prerequisite injection", () => {
+  it("includes a channel-lookup for 'send a message' goal", async () => {
+    const resolved = await resolveGoal({
+      goal: "send a message in a channel",
+      serverName: "prereq-send-test",
+    });
+
+    const ops = resolved.plan.resolvedOperationIds;
+    assert.ok(
+      ops.some((id) => /message|chat/i.test(id)),
+      `must include a messaging endpoint, got: ${ops.join(", ")}`,
+    );
+    assert.ok(
+      ops.some((id) => /channels[._-]info|rooms[._-]info/i.test(id)),
+      `must include a channel-lookup endpoint, got: ${ops.join(", ")}`,
+    );
+  });
+
+  it("includes lookup endpoints for 'invite user to channel' goal", async () => {
+    const resolved = await resolveGoal({
+      goal: "invite a user to a channel",
+      serverName: "prereq-invite-test",
+    });
+
+    const ops = resolved.plan.resolvedOperationIds;
+    assert.ok(
+      ops.some((id) => /invite/i.test(id)),
+      `must include an invite endpoint, got: ${ops.join(", ")}`,
+    );
+    assert.ok(
+      ops.some((id) => /channels[._-]info|rooms[._-]info/i.test(id)),
+      `must include a channel-lookup endpoint, got: ${ops.join(", ")}`,
+    );
+  });
+
+  it("does not inject lookups for read-only goals", async () => {
+    const resolved = await resolveGoal({
+      goal: "get workspace statistics",
+      serverName: "prereq-readonly-test",
+    });
+
+    const ops = resolved.plan.resolvedOperationIds;
+    assert.ok(
+      ops.some((id) => /statistic/i.test(id)),
+      "must include a statistics endpoint",
+    );
+    assert.ok(
+      !ops.some((id) => /channels[._-]info|rooms[._-]info/i.test(id)),
+      "must NOT inject channel-lookup for a read-only goal",
     );
   });
 });

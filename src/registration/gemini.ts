@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +14,7 @@ export interface RegisterGeminiServerInput {
   projectDir: string;
   scope?: "project" | "global";
   workspaceDir?: string;
+  installDependencies?: boolean;
   /** Override for testing -- replaces os.homedir(). */
   _homeDir?: string;
 }
@@ -20,6 +22,7 @@ export interface RegisterGeminiServerInput {
 export interface RegisterGeminiServerResult {
   settingsPath: string;
   created: boolean;
+  dependenciesInstalled: boolean;
 }
 
 export function buildGeminiServerEntry(projectDir: string): GeminiServerEntry {
@@ -38,6 +41,18 @@ function resolveSettingsPath(input: RegisterGeminiServerInput): string {
   }
   const workspace = input.workspaceDir ?? process.cwd();
   return join(resolve(workspace), ".gemini", "settings.json");
+}
+
+export function installProjectDependencies(projectDir: string): void {
+  const resolved = resolve(projectDir);
+  if (!existsSync(join(resolved, "package.json"))) {
+    throw new Error(`No package.json found in "${resolved}".`);
+  }
+  execSync("npm install --no-audit --no-fund", {
+    cwd: resolved,
+    stdio: "pipe",
+    timeout: 120_000,
+  });
 }
 
 export function registerGeminiServer(
@@ -60,5 +75,14 @@ export function registerGeminiServer(
   mkdirSync(dirname(settingsPath), { recursive: true });
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
 
-  return { settingsPath, created };
+  let dependenciesInstalled = false;
+  if (input.installDependencies !== false) {
+    const nodeModulesPath = join(resolve(input.projectDir), "node_modules");
+    if (!existsSync(nodeModulesPath)) {
+      installProjectDependencies(input.projectDir);
+      dependenciesInstalled = true;
+    }
+  }
+
+  return { settingsPath, created, dependenciesInstalled };
 }

@@ -5,10 +5,12 @@ import {
   type GenerationPlan,
   type OutputMode,
   type PlanConfidence,
+  type SchemaConnection,
   type SearchResult,
   type SuggestionResult,
 } from "../domain/index.js";
 import {
+  type DependencyGraph,
   buildGenerationPlan,
   buildDependencyGraph,
   groupCapabilities,
@@ -146,6 +148,180 @@ const STOP_WORDS = new Set([
   "a", "an", "the", "and", "or", "to", "for", "from", "with", "in", "of",
   "is", "it", "my", "on", "at", "by", "do", "be", "so", "if", "up",
 ]);
+
+const ENTITY_ID_KEYS = new Set([
+  "room_id", "user_id", "message_id", "team_id",
+  "department_id", "agent_id", "visitor_id",
+  "integration_id", "file_id", "role_id",
+]);
+
+const INPUT_FIELD_TO_ENTITY: Array<[RegExp, string]> = [
+  [/\b(roomId|rid|channelId|channel_id)\b/, "room_id"],
+  [/\b(userId|uid|ownerId|owner_id)\b/, "user_id"],
+  [/\b(messageId|msgId|msg_id)\b/, "message_id"],
+  [/\b(teamId)\b/, "team_id"],
+  [/\b(departmentId)\b/, "department_id"],
+  [/\b(agentId)\b/, "agent_id"],
+  [/\b(visitorId)\b/, "visitor_id"],
+];
+
+const ENTITY_LOOKUP_PATTERNS: Record<string, RegExp[]> = {
+  room_id: [/channels[._-]info/i, /rooms[._-]info/i, /channels[._-]list/i, /rooms[._-]get/i],
+  user_id: [/users[._-]info/i, /users[._-]list/i],
+  message_id: [/chat[._-]getMessage/i, /chat[._-]search/i],
+  team_id: [/teams[._-]info/i, /teams[._-]listAll/i],
+  department_id: [/livechat[._-]department/i],
+  agent_id: [/livechat[._-]agent/i],
+  visitor_id: [/livechat[._-]visitor/i],
+};
+
+const MAX_INJECTED_LOOKUPS = 3;
+
+function detectEntityKeysFromSchema(schema: Record<string, unknown>): Set<string> {
+  const keys = new Set<string>();
+  const schemaStr = JSON.stringify(schema);
+  for (const [pattern, entityKey] of INPUT_FIELD_TO_ENTITY) {
+    if (pattern.test(schemaStr)) {
+      keys.add(entityKey);
+    }
+  }
+  return keys;
+}
+
+export function injectPrerequisiteLookups(input: {
+  selectedIds: string[];
+  graph: DependencyGraph;
+}): string[] {
+  const { selectedIds, graph } = input;
+  const selectedSet = new Set(selectedIds);
+  const injected: string[] = [];
+
+  const neededEntityKeys = new Set<string>();
+  for (const opId of selectedIds) {
+    const endpoint = graph.endpointsById.get(opId);
+    if (!endpoint || endpoint.method === "GET") {
+      continue;
+    }
+
+    const incoming = graph.incomingByOperationId.get(opId) ?? [];
+    for (const connection of incoming) {
+      if (
+        ENTITY_ID_KEYS.has(connection.fieldName) &&
+        connection.to.direction === "input"
+      ) {
+        neededEntityKeys.add(connection.fieldName);
+      }
+    }
+
+    for (const key of detectEntityKeysFromSchema(endpoint.inputSchema)) {
+      neededEntityKeys.add(key);
+    }
+  }
+
+  const providedEntityKeys = new Set<string>();
+  for (const opId of selectedIds) {
+    const endpoint = graph.endpointsById.get(opId);
+    if (!endpoint || endpoint.method !== "GET") {
+      continue;
+    }
+    const outgoing = graph.outgoingByOperationId.get(opId) ?? [];
+    for (const connection of outgoing) {
+      if (ENTITY_ID_KEYS.has(connection.fieldName)) {
+        providedEntityKeys.add(connection.fieldName);
+      }
+    }
+  }
+
+  for (const entityKey of neededEntityKeys) {
+    if (providedEntityKeys.has(entityKey) || injected.length >= MAX_INJECTED_LOOKUPS) {
+      continue;
+    }
+
+    const bestFromGraph = findBestLookupFromGraph(entityKey, selectedSet, graph);
+    if (bestFromGraph) {
+      injected.push(bestFromGraph);
+      selectedSet.add(bestFromGraph);
+      continue;
+    }
+
+    const bestFromPattern = findBestLookupByPattern(entityKey, selectedSet, graph);
+    if (bestFromPattern) {
+      injected.push(bestFromPattern);
+      selectedSet.add(bestFromPattern);
+    }
+  }
+
+  return [...selectedIds, ...injected];
+}
+
+function findBestLookupFromGraph(
+  entityKey: string,
+  alreadySelected: Set<string>,
+  graph: DependencyGraph,
+): string | null {
+  const candidates: Array<{ operationId: string; score: number }> = [];
+
+  for (const connection of graph.connections) {
+    if (
+      connection.fieldName !== entityKey ||
+      connection.from.direction !== "output" ||
+      alreadySelected.has(connection.from.operationId)
+    ) {
+      continue;
+    }
+
+    const sourceEndpoint = graph.endpointsById.get(connection.from.operationId);
+    if (!sourceEndpoint || sourceEndpoint.method !== "GET") {
+      continue;
+    }
+
+    const confidenceScore = { exact: 3, likely: 2, possible: 1 }[connection.confidence];
+    const isInfo = /info\b/i.test(sourceEndpoint.operationId) ? 2 : 0;
+    candidates.push({
+      operationId: connection.from.operationId,
+      score: confidenceScore + isInfo,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const deduped = new Map<string, number>();
+  for (const c of candidates) {
+    const existing = deduped.get(c.operationId) ?? 0;
+    if (c.score > existing) {
+      deduped.set(c.operationId, c.score);
+    }
+  }
+
+  return [...deduped.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function findBestLookupByPattern(
+  entityKey: string,
+  alreadySelected: Set<string>,
+  graph: DependencyGraph,
+): string | null {
+  const patterns = ENTITY_LOOKUP_PATTERNS[entityKey];
+  if (!patterns) {
+    return null;
+  }
+
+  for (const pattern of patterns) {
+    for (const [opId, endpoint] of graph.endpointsById) {
+      if (
+        endpoint.method === "GET" &&
+        !alreadySelected.has(opId) &&
+        pattern.test(opId)
+      ) {
+        return opId;
+      }
+    }
+  }
+
+  return null;
+}
 
 const MAX_SELECTED_OPERATION_IDS = 8;
 const MAX_CRUD_CLUSTER_SIZE = 6;
@@ -575,6 +751,17 @@ export async function resolveGoal(input: {
     throw new Error(`No operationIds could be resolved for "${input.goal}".`);
   }
 
+  const preferredMethod = inferPreferredMethod(input.goal);
+  let enrichedIds = selection.operationIds;
+  if (preferredMethod === "WRITE") {
+    const allEndpoints = await loadAllEndpoints();
+    const graph = buildDependencyGraph(allEndpoints);
+    enrichedIds = injectPrerequisiteLookups({
+      selectedIds: selection.operationIds,
+      graph,
+    });
+  }
+
   const confidence = computePlanConfidence(selection);
   const planId = input.serverName
     ? `${input.serverName}-${randomUUID().slice(0, 8)}`
@@ -582,7 +769,7 @@ export async function resolveGoal(input: {
 
   return buildResolvedGoalFromIds({
     planId,
-    initialOperationIds: selection.operationIds,
+    initialOperationIds: enrichedIds,
     confidence,
     serverName: input.serverName,
     outputMode: input.outputMode,
@@ -641,11 +828,21 @@ export async function adjustResolvedGoal(input: {
     throw new Error("Adjustment resulted in an empty operation set.");
   }
 
+  const allEndpoints = await loadAllEndpoints();
+  const graph = buildDependencyGraph(allEndpoints);
+  const hasWriteEndpoint = mergedIds.some((id) => {
+    const ep = graph.endpointsById.get(id);
+    return ep && ep.method !== "GET";
+  });
+  const enrichedIds = hasWriteEndpoint
+    ? injectPrerequisiteLookups({ selectedIds: mergedIds, graph })
+    : mergedIds;
+
   const allTerms = extractGoalTerms(
-    mergedIds.join(" "),
+    enrichedIds.join(" "),
   );
   const confidence = computePlanConfidence({
-    operationIds: mergedIds,
+    operationIds: enrichedIds,
     goalTerms: allTerms,
     coveredTerms: new Set(allTerms),
     hasWorkflowMatch: input.previousGoal.confidence.signals.includes("workflow_match"),
@@ -654,7 +851,7 @@ export async function adjustResolvedGoal(input: {
 
   return buildResolvedGoalFromIds({
     planId: input.previousGoal.planId,
-    initialOperationIds: mergedIds,
+    initialOperationIds: enrichedIds,
     confidence,
     serverName: input.previousGoal.plan.serverName,
     outputMode: input.previousGoal.plan.outputMode,

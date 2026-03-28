@@ -4,19 +4,17 @@ You are using the Rocket.Chat MCP Generator extension.
 
 ## Purpose
 
-This extension generates **minimal Rocket.Chat MCP servers** instead of broad API wrappers.
+This extension **generates** minimal Rocket.Chat MCP servers. It is a code-generation tool, NOT a Rocket.Chat client.
 
-The goal is to keep the generated server:
-- small
-- production-ready
-- readable
-- testable
+## IMPORTANT: When to use these tools
+
+Only use the generator tools (`resolve_goal`, `generate_from_plan`, etc.) when the user explicitly asks to **generate**, **create**, or **build** a new MCP server.
+
+If the user asks to **send a message**, **list channels**, **create a user**, or perform any other Rocket.Chat action, do NOT call the generator. Instead, use the tools from an already-generated Rocket.Chat MCP server (if one is connected) or tell the user they need to generate one first.
 
 ## Workflow
 
-Use the tools in this order.
-
-Default flow for Gemini CLI:
+When the user asks to generate a new server, use the tools in this order:
 
 1. Call `resolve_goal` with the user's natural-language description.
 2. Show the returned plan summary to the user and confirm it.

@@ -13,6 +13,7 @@ import {
   writeGeneratedProject,
 } from "../../generation/project-generator.js";
 import {
+  channelsInfoEndpoint,
   channelsListEndpoint,
   loginEndpoint,
   postMessageEndpoint,
@@ -60,17 +61,19 @@ describe("generateProjectFiles", () => {
   it("generates workflow-backed tool files alongside endpoint tools", () => {
     const plan = buildGenerationPlan({
       serverName: "workflow-server",
-      endpoints: [statisticsEndpoint, postMessageEndpoint, loginEndpoint],
+      endpoints: [statisticsEndpoint, channelsInfoEndpoint, postMessageEndpoint, loginEndpoint],
       selectedOperationIds: [],
       selectedWorkflows: ["send_alerts_from_statistics"],
       resolvedWorkflowOperationIds: [
         statisticsEndpoint.operationId,
+        channelsInfoEndpoint.operationId,
         postMessageEndpoint.operationId,
       ],
     });
 
     const files = generateProjectFiles(plan, [
       statisticsEndpoint,
+      channelsInfoEndpoint,
       postMessageEndpoint,
       loginEndpoint,
     ]);
