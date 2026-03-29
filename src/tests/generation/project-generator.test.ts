@@ -129,6 +129,24 @@ describe("generateProjectFiles", () => {
     }
   });
 
+  it("generates login tool with startup auth note in description", () => {
+    const plan = buildGenerationPlan({
+      serverName: "auth-server",
+      endpoints: [loginEndpoint, channelsInfoEndpoint],
+      selectedOperationIds: [loginEndpoint.operationId, channelsInfoEndpoint.operationId],
+    });
+
+    const files = generateProjectFiles(plan, [loginEndpoint, channelsInfoEndpoint]);
+    const loginToolFile = files["src/tools/post-api-v1-login.ts"];
+
+    assert.ok(loginToolFile, "Login tool file must be generated");
+    assert.match(
+      loginToolFile,
+      /already authenticates at startup/,
+      "Login tool description must mention that auth is handled at startup",
+    );
+  });
+
   it("exposes all endpoints as standalone tools alongside capabilities", () => {
     const graph = buildDependencyGraph([
       channelsListEndpoint,

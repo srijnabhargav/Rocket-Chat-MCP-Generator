@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   adjustResolvedGoal,
+  injectPrerequisiteLookups,
   listWorkflows,
   resolveGoal,
   searchEndpoints,
@@ -17,11 +18,15 @@ import {
 } from "../../domain/index.js";
 import { writeGeneratedProject } from "../../generation/index.js";
 import {
+  buildDependencyGraph,
   buildGenerationPlan,
+  groupCapabilities,
+  resolveEndpointDependencies,
   resolveWorkflowSelections,
 } from "../../planning/index.js";
 import {
   discoverEndpoints,
+  getAllFullEndpoints,
   getAvailableDomains,
   getEndpointsByIds,
 } from "../../specs/index.js";
@@ -51,14 +56,35 @@ async function resolvePlan(input: {
   const mergedOperationIds = [
     ...new Set([...input.operationIds, ...workflowResolution.resolvedWorkflowOperationIds]),
   ];
-  const initialEndpoints = await getEndpointsByIds(mergedOperationIds);
+
+  const allEndpoints = await getAllFullEndpoints();
+  const graph = buildDependencyGraph(allEndpoints);
+
+  const hasWriteEndpoint = mergedOperationIds.some((id) => {
+    const ep = graph.endpointsById.get(id);
+    return ep && ep.method !== "GET";
+  });
+  const enrichedIds = hasWriteEndpoint
+    ? injectPrerequisiteLookups({ selectedIds: mergedOperationIds, graph })
+    : mergedOperationIds;
+
+  const depResolution = resolveEndpointDependencies(enrichedIds, graph);
+  const fullyResolvedIds = [...new Set([...enrichedIds, ...depResolution.required])];
+
+  const resolvedEndpoints = await getEndpointsByIds(fullyResolvedIds);
+  const capabilities = groupCapabilities({
+    endpointIds: fullyResolvedIds,
+    preferredOperationIds: input.operationIds,
+    graph,
+  });
   const plan = buildGenerationPlan({
     serverName: input.serverName,
     outputMode: input.outputMode,
-    endpoints: initialEndpoints,
+    endpoints: resolvedEndpoints,
     selectedOperationIds: input.operationIds,
     selectedWorkflows: workflowResolution.selectedWorkflows,
     resolvedWorkflowOperationIds: workflowResolution.resolvedWorkflowOperationIds,
+    capabilities,
     warnings: workflowResolution.warnings,
   });
   const endpoints = await getEndpointsByIds(plan.resolvedOperationIds);

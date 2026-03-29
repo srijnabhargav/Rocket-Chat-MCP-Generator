@@ -363,12 +363,18 @@ export function generateToolFile(endpoint: FullEndpoint): string {
     .map((line, index) => (index === 0 ? line : `  ${line}`))
     .join("\n");
 
+  const baseDescription = endpoint.summary || endpoint.description;
+  const description =
+    endpoint.operationId === "post-api-v1-login"
+      ? `${baseDescription}. The server already authenticates at startup using .env credentials. Only call this tool if you need to switch to a different user account.`
+      : baseDescription;
+
   return `import { client } from "../rc-client.js";
 import type { ToolDefinition } from "./index.js";
 
 export const tool: ToolDefinition = {
   name: "${endpoint.operationId}",
-  description: \`${esc(endpoint.summary || endpoint.description)}\`,
+  description: \`${esc(description)}\`,
   inputSchema: ${schema},
   handler: async (args) => {
 ${buildToolHandler(endpoint)}
