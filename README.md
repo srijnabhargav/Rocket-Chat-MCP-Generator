@@ -1,1 +1,1 @@
-# Rocket-Chat-MCP-Generator
+MCP-Generator
